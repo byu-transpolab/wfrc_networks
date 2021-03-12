@@ -105,3 +105,41 @@ extract_roads <- function(bb, gdb_path){
   )
   
 }
+
+
+
+#' Write link and node sets to CSV files
+#' 
+#' @param linknodeset A list with two SF objects named `links` and `nodes`
+#' @param folder Where the files will be written.
+#' 
+#' @details 
+#' Writes out three files in the target folder:
+#'   - `network.geojson` A map for visualization
+#'   - `links.csv` A CSV file of all the links with attributes
+#'   - `nodes.csv` A CSV file of all the nodes with coordinates
+#' 
+#' 
+write_linknodes <- function(linknodeset, folder){
+  
+  # check if folder exists
+  if(!dir.exists(folder)) dir.create(folder)
+  
+  # write links as a geojson for mapping
+  sf::st_write(linknodeset$links, file.path(folder, "network.geojson"), 
+               delete_dsn = TRUE)
+   
+  # write links as CSV file
+  readr::write_csv(linknodeset$links %>% sf::st_set_geometry(NULL), file.path(folder, "links.csv"))
+  
+  # write nodes file
+  linknodeset$nodes %>%
+    dplyr::mutate(
+      x = sf::st_coordinates(.)[, 1],
+      y = sf::st_coordinates(.)[, 2]
+    ) %>%
+    sf::st_set_geometry(NULL) %>%
+    readr::write_csv(file.path(folder, "nodes.csv"))
+}
+
+
