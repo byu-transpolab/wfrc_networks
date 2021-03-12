@@ -65,7 +65,8 @@ extract_roads <- function(bb, gdb_path){
       aadt = ifelse(AADT == 0, NA, AADT),
       oneway = ifelse(is.na(Oneway), "FT", Oneway),
       length = Length_Miles,
-      speed = Speed
+      speed = Speed, 
+      ftype = gsub(".*?([0-9]+).*", "\\1", RoadClass),
     ) %>%
     sf::st_filter(bb)
     
