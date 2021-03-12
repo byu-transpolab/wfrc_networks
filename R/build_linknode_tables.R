@@ -60,12 +60,13 @@ extract_roads <- function(bb, gdb_path){
   links <- sf::st_read(gdb_path, layer = "AutoNetwork") %>%
     sf::st_transform(4326) %>%
     # create a link id and get other attributes
-    dplyr::mutate(
+    dplyr::transmute(
       link_id = dplyr::row_number(), 
-      AADT = ifelse(AADT == 0, NA, AADT)) %>%
-    dplyr::select(
-      link_id, oneway = Oneway, 
-      speed = Speed, length = Length_Miles, RoadClass, AADT)  %>%
+      aadt = ifelse(AADT == 0, NA, AADT),
+      oneway = ifelse(is.na(Oneway), "FT", Oneway),
+      length = Length_Miles,
+      speed = Speed
+    ) %>%
     sf::st_filter(bb)
     
   
@@ -141,5 +142,6 @@ write_linknodes <- function(linknodeset, folder){
     sf::st_set_geometry(NULL) %>%
     readr::write_csv(file.path(folder, "nodes.csv"))
 }
+
 
 
