@@ -1,0 +1,585 @@
+---
+title: "Links Network Maker"
+author: "Chris Day"
+date: "2/13/2021"
+output: html_document
+---
+# {.tabset}
+```{r, include=FALSE}
+library(rmarkdown)
+library(tidyverse)
+library(foreign)
+library(leaflet)
+library(sf)
+library(stringi)
+```
+
+## Introduction 
+### Goal
+In this markdown, we create a full links.csv to use to create a network for the Utah area. More specifically, in beam, there is a method called "LinkTablesReader" that takes in a nodes.csv and links.csv files and spits out a network xml. We need to have accurate links and nodes files in order to create this network. So, we will do that.
+
+***
+
+### Source Data
+The original data that was given to me from WFRC is shown below.
+
+ * Auto Network: This is a full streets network. This is the base for all the network we will create.
+ * TDM Network: This is the Travel Demand Model network. It does not contain all roads, but has some information needed. 
+ * Master Segments: This is a "main streets" network. It contains highways, interstates, and main roads for Utah.
+ * Segment Summaries: This is a data table linked to the Master Segments data. It contains information we need.
+
+In ArcGis Pro, the above files were manipulated into three joint files that will be necessary for our analysis. The three joint network files are shown in the following tab. The process and reasoning for creating them is also explained.
+
+***
+
+### Lion Picture
+```{r}
+#<center>
+#![](ArcGis_joins/1-featured-Credit-Jackie-Badenhorst-1.jpg)
+#</center>
+```
+
+## ArcGis Joint Files
+### Explanation
+Really, the following ArcGis Joint files will be combined together. Simply put, these files are needed to eliminate a few errors. One invovles correcting freeway values, and the other invovles better freeway ramp values. 
+
+***
+
+### Auto Master Basic
+The first joint file combines the Auto Network and the Master Segments network. As slightly mentioned in the introduction, the Auto Network contains all necessary links that are needed, but it does not contain all necessary information (for example, it lacks capacity, lane, freeflow speed, etc.). The Master Segments network contains the means to such information. The Auto Master Basic join is simply a spatial join between these two files. The Master Segments data was mapped onto the Auto Network. It is the basic join because it will be the platform to which future information and changes will be added.
+
+Below is a picture of the Model Builder to explain the process as to how the master Segments data was mapped onto the Auto Network.
+
+<center>
+![Model Builder](data/ArcGisJoins/auto_master_basic/basic join.PNG)
+</center>
+
+* It is important to understand that this join is *imperfect*. The implications of spatial joins were minimized using "Have their center in" within an 8m radius, and only joining one to one, but it still has problems.
+
+Now we read in the joint file.
+```{r,message=FALSE,results=FALSE}
+auto_master_basic <- st_read("data/ArcGisJoins/auto_master_basic/auto_master_basic.shp") %>%
+  select(link_id,SEGID,Name,Oneway,Speed,DriveTime,Length_Mil,RoadClass,AADT) %>%
+  st_transform(4326)
+```
+
+***
+
+### Auto Master Freeway
+The Auto Master Basic file currently only has data for northbound I-15 and eastbound major separated highways. As a way to solve this, some magic was done in ArcGis. The Master Segments that correspond to these highways were extracted and the auto network links that correspond to these highways were extracted. They were then combined with a large buffer on the master segments, allowing BOTH lanes (NB and SB or EB and WB) from the auto shapefile to receive the data from the master Segments. This file will then be combined onto the Auto Master Basic file, allowing both sides of the important highways to have corresponding data.
+
+Below is the model builder to how the auto network was able to get information from the master segments on both sides of main highways.
+
+<center>
+![Model Builder](data/ArcGisJoins/auto_master_freeway/full_freeways.PNG)
+</center>
+
+Lets read in the data and join it onto the Auto Master Basic File. By doing so, we fix the missing freeway value problem.
+```{r,message=FALSE,results=FALSE}
+# read in the freeways arcgis join file
+freeways <- st_read("data/ArcGisJoins/auto_master_freeway/auto_master_freeway.shp") %>%
+  select(link_id,SEGID,Name,Oneway,Speed,DriveTime,Length_Mil,RoadClass,AADT) %>%
+  rename_at(vars(-1), ~ paste0(., '_fw'))
+  st_geometry(freeways) <- NULL
+
+#replace all the values from the basic file with the values from the freeways file  
+auto_master_freeways <- left_join(auto_master_basic,freeways,by="link_id",keep=FALSE) %>%
+  mutate(
+    Name=coalesce(Name_fw,Name),
+    SEGID=coalesce(SEGID_fw,SEGID),
+    Oneway=coalesce(Oneway_fw,Oneway),
+    Speed=coalesce(Speed_fw,Speed),
+    DriveTime=coalesce(DriveTime_fw,DriveTime),
+    Length_Mil=coalesce(Length_Mil_fw,Length_Mil),
+    RoadClass=coalesce(RoadClass_fw,RoadClass),
+    RC = as.numeric(gsub("( ).*", "\\1", RoadClass)),
+    AADT=coalesce(AADT_fw,AADT)
+  ) %>% select(1:8,19,9)
+```
+
+We now have a basic table that has corrected freeway and separated highway links. 
+
+***
+
+### Auto Master Ramps
+The Master Segments dataset did not have any links corresponding to on and off ramps. The TDM network did, however. Unfortunately, the TDM network does not line up very well spatially with the auto network, hence why we got most of our information from the Master Segments file. But, since we have no where else to go to get data for on and off ramps, we attempt to extract this data from the TDM network.
+
+The Model Builder explaining how this file was created is shown below. Notice how only the links corresponding to Ramps or Collectors from the auto network are given values from the TDM network.
+
+<center>
+![Model Builder](data/ArcGisJoins/auto_tdm_ramps/ramps.PNG)
+</center>
+
+Now we read in the data and join it onto the Auto Master file. 
+```{r,message=FALSE,results=FALSE}
+#read in ramp information
+auto_tdm_ramps <- st_read("data/ArcGisJoins/auto_tdm_ramps/auto_tdm_ramps.shp") %>%
+  select(link_id,RoadClass,STREET,SEGID,LANES,FTCLASS,ATYPENAME,FF_SPD,CAP1HR1LN) %>%
+  rename_at(vars(-1), ~ paste0(., '_tdm')) %>%
+  st_transform(4326)
+  st_geometry(auto_tdm_ramps) <- NULL
+  
+#join ramp data onto the current auto master file
+auto_master_fwr <- left_join(auto_master_freeways,auto_tdm_ramps,by="link_id")
+```
+
+***
+
+### Combination of ArcGis Files
+Now we have an improved data table; it includes the Auto Master Basic with improved freeways values and optional values for ramps. Lets improve this table by adding the segment summaries information, and the two and from node values. 
+
+Lets read in the segment summary data. We also read in a data table corresponding to the to and from nodes from the Auto Network. For some reason the Auto Network shapefile didn't contain to and from nodes. 
+```{r,message=FALSE,results=FALSE}
+#read in the capacity/segment summary data. 
+seg_summaries <- read.dbf("data/segment_summaries.dbf") %>%
+  select(SEGID,CAP1HL,LANES,FT,FTCLASS,FF_SPD,AM_VOL,MD_VOL,PM_VOL)
+# read in links data csv to get to/from node info
+links_nodes <- read_csv("data/auto_links.csv") %>%
+  select(link_id,from_node,to_node)
+```
+
+Also, there is a slight problem that we should fix that has to do with a coding eror with the SEGID field. About 20 SEGID values in this file have an extra number at the end. Lets fix that and then attach the segment summary information by using the common variable SEGID. The ArcGis combination file will then be ready for further analysis. We will call it Auto Master Joint. 
+
+```{r,message=FALSE,results=FALSE}
+#fix coding error from joint file that deletes the extra number at end of some segids
+auto_master_fix <- auto_master_fwr %>%
+  mutate(nchar = stri_length(SEGID),
+         SEGID = ifelse(nchar < 11, as.character(SEGID), substr(SEGID, 1, nchar-1)))%>%
+  select(1:19)
+#combine the auto_master_basic file with the data from the segment summaries and auto data
+auto_master_joint1 <- left_join(auto_master_fix,links_nodes,by="link_id")
+auto_master_joint <- left_join(auto_master_joint1,seg_summaries,by = "SEGID")%>%
+  select(1:10,19:28,11:18)
+```
+
+The Auto Master Joint file represents the combination of all three ArcGis joins, as well as the segment summary data and the to from node information. We now have an improved form of the basic file. It is still not complete. We need to analyze its values to make sure then make sense, and if they don't fix them so that they do.
+
+```{r, include=FALSE}
+#make sure the SEGID code worked
+nofix <- auto_master_fwr %>% filter(stri_length(SEGID)>10) #11 values
+fix <- auto_master_fix %>% filter(stri_length(SEGID)>10) #0 values
+```
+
+## Data Analysis
+### Freeways and Ramps
+Lets take a peak at the freeways and ramps and their capacity values, and see if they look reasonable. Hopefully they do, after all that work we just did.
+
+#### Freeways
+```{r}
+freewaycaps <- auto_master_joint %>% filter(RC==1, CAP1HL>0)
+freewaynocaps <- auto_master_joint %>% filter(RC==1, is.na(CAP1HL))#34 missing caps
+```
+It looks like only 34 values with a RoadClass of Interstate are missing capacity values, and all links that do have capacity values look reasonable! The map is also showing both sides of the freeway having capacity values! It looks like our method worked.
+
+```{r, echo=FALSE, results=TRUE}
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = freewaycaps, group = "Capacities", color = "blue")%>%
+  #addPolylines(data = nocaps, group = "No Capacities", color = "red")%>%
+  addLayersControl(overlayGroups = c("Roadways with Capacities"))
+```
+
+**To Improve**: We need to put default values into the 34 Interstate links that have missing information.
+
+#### Ramps
+```{r}
+rampscaps <- auto_master_joint %>% filter(RC==7, CAP1HR1LN_tdm>0)
+rampsnocaps <- auto_master_joint %>% filter(RC==7, is.na(CAP1HR1LN_tdm))#425 missing caps
+```
+
+It looks like there are 425 links that are classified as RoadClass Ramps, but do not have values attached to them. This isn't a super low number, but at least 1,318 ramp links did get data. Its better to have less, but accurate data, then more, but incorrect data. Below is the map of what ramp values have capacities. It looks like our method did an okay job!
+
+```{r, echo=FALSE, results=TRUE}
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = rampscaps, group = "Capacities", color = "blue")%>%
+  #addPolylines(data = nocaps, group = "No Capacities", color = "red")%>%
+  addLayersControl(overlayGroups = c("Ramps with Capacities"))
+```
+
+**To Improve**: We need to put default values into the 424 Interstate links that have missing information. 
+
+***
+
+### Mismatched Link Information
+Spatial Joins in ArcGis are generally not perfect. One of the goals of this code is to fix and minimize the errors from the ArcGis joins as we create the links file. The first step in doing that was creating three different ArcGis joins, and joining them together. We already did that. The next step is to identify potential join errors, and try to fix them. The main error that occurs is mismatched data. Or in other words, links receiving information from the incorrect source link. This can happen at intersection, or when links are in close proximity to each other.
+
+#### Roads Passing over/under Each Other
+An example of where mismatched link data was transferred in the ArcGis join has to do with Freeways. Two different things occured involving the incorrect passing of SEGID values.
+
+The first thing was freeway links that were assigned values of links that either passed directly through or underneath them. These links were assigned incorrect values (like a capacity value of 600 instead of 1600). This only occured in 5 places though. This error would have been greater if a we didn't create a separate Freeway ArcGis join. 
+
+The second error occured with local roads that were assigned freeway values from being either too close at intersection, or by passing underneath. Luckily, there are only 35 definite instances of this occuring.
+
+The map below shows the definte 40 links that are clearly incorrectly assigned. It shows that the ArcGis join is definitely not perfect. 
+
+```{r, include=FALSE}
+fw_low <- auto_master_joint %>%
+  filter(RC == 1)%>%
+  filter(FTCLASS != "Freeway")
+loc_high <- auto_master_joint %>%
+  filter(FTCLASS == "Freeway")%>%
+  filter(RC %in% (8:99))
+```
+
+```{r, echo=FALSE, results=TRUE}
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = loc_high, group = "Local Roads w/ FW Values", color = "red") %>%
+  addPolylines(data = fw_low, group = "FW w/ Local Roads Values", color = "blue") %>%
+  addLayersControl(overlayGroups = c("Bad Join Areas"))
+```
+
+**To Improve**: Delete the information stored in the 40 incorrect values and replace them with default values. Default values are better than incorrect values. 
+
+#### Roads caught inside Incorrect Buffer
+Although the previous part explained the mismatching of links near freeways, that idea applies to ALL links. Any two roads that intersect in a certain way, or any two roads that are close enough to have their centers in each others buffer, will have mismatched data. Therefore, we need to find a solution to not only the freeway link mismatches, but ALL mismatches in general.
+
+A basic way to at least minimize the error is to analyze the FTCLASS from the master segment data with the RoadClass from the auto network data. They are similar fields, and can be compared to help us eliminate mismatched data. For example, if a RoadClass of Interstate is matched with an FTCLASS of Local, we know that the data is mismatched. The road types do not match up!
+
+Below is a list of the RoadClass values and their corresponding number
+
+```{r, echo = FALSE, message=FALSE}
+rc <- unique(auto_master_joint$RoadClass)
+rc
+```
+
+The table below shows a basic understanding of the connection between FTCLASS and RoadClass. This table was determined by analyzing each possible combination of FTCLASS and RoadClass, and seeing on a map if the values made sense. After that, the question "Would this RoadClass fit into this FTCLASS category?" was asked. These two methods helped determine which RoadClasses fit into each FTCLASS category.    
+
+| FTCLASS             | RoadClass               |
+|---------------------|-------------------------|
+| Collector           | 5-11, 99                |
+| Expressway          | 3-5, 10                 |
+| Freeway             | 1-5                     |
+| Local               | 11                      | 
+| Minor Arterial      | 3-6, 8, 10-11, 15, 99   |
+| Principal Arterial  | 3-5, 8, 10              |
+
+I have also included a color coded map to show all the values that will need to be replaced.
+```{r, include=FALSE}
+clct <- auto_master_joint %>% filter(FTCLASS == "Collector") %>% filter(RC %in% c(1:4,12:18))
+exp <- auto_master_joint %>% filter(FTCLASS == "Expressway") %>% filter(RC %in% c(1,2,6:9,11:100))
+fw <- auto_master_joint %>% filter(FTCLASS == "Freeway") %>% filter(RC %in% c(6:100))
+loc <- auto_master_joint %>% filter(FTCLASS == "Local") %>% filter(RC != 11)
+ma <- auto_master_joint %>% filter(FTCLASS == "Minor Arterial") %>% 
+  filter(RC %in% c(1,2,7,9,12:14,17))
+pa <- auto_master_joint %>% filter(FTCLASS == "Principal Arterial") %>% 
+  filter(RC %in% c(1,2,6,7,9,11:100))
+badloc <- auto_master_joint %>% filter(RC == 1) %>% filter(FTCLASS != "Freeway")
+```
+
+```{r, echo=FALSE}
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = clct, group = "Collectors", color = "red") %>%
+  addPolylines(data = exp, group = "Expressways", color = "orange") %>%
+  addPolylines(data = fw, group = "Freeways", color = "yellow") %>%
+  addPolylines(data = loc, group = "Local Roads", color = "green") %>%
+  addPolylines(data = ma, group = "Minor Arterials", color = "blue") %>%
+  addPolylines(data = pa, group = "Principal Arterials", color = "purple") %>%
+  addPolylines(data = badloc, group = "Local Roads w/ Freeway Vals", color = "pink") %>%
+  addLayersControl(baseGroups = c("Mismatched Data"),overlayGroups = c("Collectors","Expressways","Freeways","Local Roads","Minor Arterials","Principal Arterials","Local Roads w/ Freeway Vals"),options = layersControlOptions(collapsed = FALSE))
+```
+
+**To Improve**: Any links that don't match up with this table should have their data deleted, and replaced with default values.
+
+## Fix Errors / Add Default Values 
+### Process
+In the previous tab, we determined a few ways to improve our data. Below is the list of what needs to be done in order to have a more correct links data table. 
+
+1. Delete incorrect / mismatched values
+    + Any links whose FTCLASS field doesn't match up with its RoadClass field needs its information deleted.
+    + Any freeway links with local road information or any local road with freeway information needs to have its information deleted.
+2. Determine default values for capacity, lanes, etc. for each FTCLASS group so that we can fill that data into the table. 
+3. Input default values for missing / deleted values. 
+    + This includes the freeway and ramp values that we saw were missing in the previous tab.
+
+***
+
+### Delete Incorrect Data
+We need to replace the incorrect data with NA values, so that later on we can input default values in its place. So, we will do that according to the table below (also on previous tab). We will also include a statement that relates to the incorrect freeway join (explained on previous tab).
+
+| FTCLASS             | RoadClass               |
+|---------------------|-------------------------|
+| Collector           | 5-11, 99                |
+| Expressway          | 3-5, 10                 |
+| Freeway             | 1-5                     |
+| Local               | 11                      | 
+| Minor Arterial      | 3-6, 8, 10-11, 15, 99   |
+| Principal Arterial  | 3-5, 8, 10              |
+
+```{r,message=FALSE,warning=FALSE}
+clean_auto_master <- auto_master_joint %>%
+  mutate(
+    CAP1HL = case_when(
+      FTCLASS == "Collector" & RC %in% c(1:4,12:18) ~ as.numeric(NA),
+      FTCLASS == "Expressway" & RC %in% c(1,2,6:9,11:100) ~ as.numeric(NA),
+      FTCLASS == "Freeway" & RC %in% c(6:100) ~ as.numeric(NA),
+      FTCLASS == "Local" & RC != 11 ~ as.numeric(NA),
+      FTCLASS == "Minor Arterial" & RC %in% c(1,2,7,9,12:14,17) ~ as.numeric(NA),
+      FTCLASS == "Principal Arterial" & RC %in% c(1,2,6,7,9,11:100) ~ as.numeric(NA),
+      RC == 1 & FTCLASS != "Freeway" ~ as.numeric(NA),
+      TRUE ~ as.numeric(CAP1HL)),
+    LANES = case_when(
+      FTCLASS == "Collector" & RC %in% c(1:4,12:18) ~ as.numeric(NA),
+      FTCLASS == "Expressway" & RC %in% c(1,2,6:9,11:100) ~ as.numeric(NA),
+      FTCLASS == "Freeway" & RC %in% c(6:100) ~ as.numeric(NA),
+      FTCLASS == "Local" & RC != 11 ~ as.numeric(NA),
+      FTCLASS == "Minor Arterial" & RC %in% c(1,2,7,9,12:14,17) ~ as.numeric(NA),
+      FTCLASS == "Principal Arterial" & RC %in% c(1,2,6,7,9,11:100) ~ as.numeric(NA),
+      RC == 1 & FTCLASS != "Freeway" ~ as.numeric(NA),
+      TRUE ~ as.numeric(LANES)),
+    FT = case_when(
+      FTCLASS == "Collector" & RC %in% c(1:4,12:18) ~ as.numeric(NA),
+      FTCLASS == "Expressway" & RC %in% c(1,2,6:9,11:100) ~ as.numeric(NA),
+      FTCLASS == "Freeway" & RC %in% c(6:100) ~ as.numeric(NA),
+      FTCLASS == "Local" & RC != 11 ~ as.numeric(NA),
+      FTCLASS == "Minor Arterial" & RC %in% c(1,2,7,9,12:14,17) ~ as.numeric(NA),
+      FTCLASS == "Principal Arterial" & RC %in% c(1,2,6,7,9,11:100) ~ as.numeric(NA),
+      RC == 1 & FTCLASS != "Freeway" ~ as.numeric(NA),
+      TRUE ~ as.numeric(FT)),
+    FTCLASS = case_when(
+      FTCLASS == "Collector" & is.na(FT) ~ as.character(NA),
+      FTCLASS == "Expressway" & is.na(FT) ~as.character(NA),
+      FTCLASS == "Freeway" & is.na(FT) ~as.character(NA),
+      FTCLASS == "Local" & is.na(FT) ~as.character(NA),
+      FTCLASS == "Minor Arterial" & is.na(FT) ~as.character(NA),
+      FTCLASS == "Principal Arterial" & is.na(FT) ~as.character(NA),
+      RC == 1 & FTCLASS != "Freeway" ~as.character(NA),
+      TRUE ~ as.character(FTCLASS))
+    )
+#is there an easier way that doesn't involve copying and pasting 8 times?
+#13+24+124+2+37+151+5 = 356
+#cleantest<- c(3956,6391,6410,8461,8481,13888,32915)
+```
+
+***
+
+### Determining and Inputting Default Values
+Now we will calculate what the default values should be for each important column, and replace the NA values with those defaults.
+
+#### FTCLASS
+We need to first provide an FTCLASS for each link. This is necessary as many other values will depend on what the FTCLASS is. The defaults are determined by which FTCLASS most occurs for each RoadClass. This is seen in the calculated table.
+
+```{r,echo=FALSE}
+rc_ft_matcher <- clean_auto_master %>%
+  count(RC,FTCLASS)
+st_geometry(rc_ft_matcher) <- NULL
+rc_ft_matcher
+```
+
+| RoadClass               | FTCLASS             |
+|-------------------------|---------------------|
+| 9, 10, 99               | Collector           |
+| 4                       | Expressway          |
+| 1, 2                    | Freeway             |
+| 6, 8, 15                | Minor Arterial      |
+| 3, 5                    | Principal Arterial  |
+| 11-14, 17               | Local               |
+
+Most of them are determined by whichever FTCLASS occurs the most, with a few exceptions. RC 6, is put as a minor arterial because collector didn't seem to fit the description. RC 7 isn't included in the table above but we will make it its own FTCLASS and give it TDM data. Also, 8 is classified as a minor arterial because it fit the description better, even though collectors occured more often. RCs 11-14 are given the Local, because they should have the lowest capacity values and their description seem more local than collector anyway.
+
+Let's assign all the FTCLASS of NA a rightful value, based on the table I just made up. 
+
+```{r,message=FALSE,warning=FALSE}
+ftclean_auto_master <- clean_auto_master %>%
+  mutate(
+    FTCLASS = case_when(
+      is.na(FTCLASS) & RC %in% c(9,10,99) ~ "Collector",
+      is.na(FTCLASS) & RC == 4 ~ "Expressway",
+      is.na(FTCLASS) & RC %in% c(1,2) ~ "Freeway",
+      is.na(FTCLASS) & RC %in% c(6,8,15) ~ "Minor Arterial",
+      is.na(FTCLASS) & RC %in% c(3,5) ~ "Principal Arterial",
+      is.na(FTCLASS) & RC %in% c(11:14,17) ~ "Local",
+      RC == 7 ~ "Ramp",
+      TRUE ~ as.character(FTCLASS)
+    )
+  )
+```
+
+
+#### Capacity and Lanes
+A simple way to determine the default capacity and lane values would be to find the average based on FTCLASS. So, we will do that.
+
+```{r, echo = FALSE, message=FALSE,warning=FALSE}
+cap_ave <- clean_auto_master %>%
+  group_by(FTCLASS) %>%
+  summarize(
+    mean_cap = mean(CAP1HL),
+    mean_ln = mean(LANES))
+  #sd_cap = sd(CAP1HL),max_cap = max(CAP1HL),min_cap = min(CAP1HL),
+    #sd_ln = sd(LANES),max_ln = max(LANES),min_ln = min(LANES))
+st_geometry(cap_ave) <- NULL
+cap_ave
+```
+
+The table above applies to most values. The exception would be the links that have an RC=7 (ramps). Their default values are shown below, and their normal values are determined from the TDM values. 
+
+```{r, echo = FALSE, message=FALSE,warning=FALSE}
+ramp_ave <- clean_auto_master %>%
+  filter(RoadClass_tdm == "7 Ramps, Collectors") %>%
+  summarize(mean_cap = mean(CAP1HR1LN_tdm), mean_ln = mean(LANES_tdm))
+st_geometry(ramp_ave) <- NULL
+ramp_ave
+```
+
+We can use these averages for default values. Lets input the default values for CAP1HL and LANES into the joint table.
+
+```{r, message=FALSE,warning=FALSE}
+cap_ln_auto_master <- ftclean_auto_master %>%
+  mutate(
+    CAP1HL = case_when(
+      is.na(CAP1HR1LN_tdm)==FALSE ~ as.numeric(CAP1HR1LN_tdm),
+      is.na(CAP1HL) & FTCLASS == "Collector" ~ 680,
+      is.na(CAP1HL) & FTCLASS == "Expressway" ~ 981,
+      is.na(CAP1HL) & FTCLASS == "Freeway" ~ 1778,
+      is.na(CAP1HL) & FTCLASS == "Minor Arterial" ~ 865,
+      is.na(CAP1HL) & FTCLASS == "Principal Arterial" ~ 916,
+      is.na(CAP1HL) & FTCLASS == "Local" ~ 400,
+      is.na(CAP1HL) & FTCLASS == "Ramp" ~ 1244,
+      TRUE ~ as.numeric(CAP1HL)),
+    LANES = case_when(
+      is.na(LANES_tdm)==FALSE ~ as.numeric(LANES_tdm),
+      is.na(LANES) & FTCLASS == "Collector" ~ 2,
+      is.na(LANES) & FTCLASS == "Expressway" ~ 4,
+      is.na(LANES) & FTCLASS == "Freeway" ~ 8,
+      is.na(LANES) & FTCLASS == "Minor Arterial" ~ 3,
+      is.na(LANES) & FTCLASS == "Principal Arterial" ~ 4,
+      is.na(LANES) & FTCLASS == "Local" ~ 2,
+      is.na(LANES) & FTCLASS == "Ramp" ~ 2,
+      TRUE ~ as.numeric(LANES)),
+    capacity = CAP1HL*LANES)
+```
+
+All default capacity and lane values have now been determined. 
+
+#### OneWay
+A crucial piece of information to include in the links table is to provide information on if the road is oneway or not. First, we need to determine which roads should be "TF" and which ones should be "B". "TF" means "to-from" whereas "B" means "both". In other words, TF is for roads that are oneway and B are for roads that aren't oneway. In the LinkTablesReader, where we convert the links.csv we are creating into an xml network, we use 1 and 0 for to describe oneway. Soon, we'll convert TF to 1 and B to 0. 
+
+First, we need to see if our data looks good so far. Let's take a look at a map showing the TF road values, and the NA road values. The rest of the roads will be B by default. 
+```{r, echo=FALSE}
+na_onewway <- clean_auto_master %>% filter(is.na(Oneway))
+tf_onewway <- clean_auto_master %>% filter(Oneway=="TF")
+
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = na_onewway, group = "NA", color = "red") %>%
+  addPolylines(data = tf_onewway, group = "TF", color = "blue") %>%
+  addLayersControl(baseGroups = c("Oneway Values"),overlayGroups = c("NA","TF"),options = layersControlOptions(collapsed = FALSE))
+```
+Simply by looking at the map, it is safe to assume that the NA values can be assumed to be TF, or oneway links. 
+
+Note: After analysis in Via, it has been determined that all NA values were drawn in the opposite direction! (MatSim has agents travel in the direction that they were created.) The analysis shows that all NA values have mismatch to/from node information. So, we will need to switch that later on, so that agents can travel in the right direction on the right roads! Without switching the information, I-15 would only be able to be traveled in one direction! That's so silly.
+
+Let's switch the to/from node information for all NA oneway values, and then assign those NA values TF. Then we will change the TF and B to 1 and 0. 
+
+```{r, message=FALSE,warning=FALSE}
+one_auto_master <- cap_ln_auto_master %>%
+  mutate(
+    start_node = case_when(
+      is.na(Oneway) ~ to_node,
+      is.na(Oneway)==FALSE ~ from_node),
+    end_node = case_when(
+      is.na(Oneway) ~ from_node,
+      is.na(Oneway)==FALSE ~ to_node),
+    Oneway = case_when(
+      Oneway == "TF" ~ 1,
+      Oneway == "B" ~ 0,
+      is.na(Oneway) ~ 1)
+  )
+```
+
+## Final Result
+### Final Table
+The last step is to add the last, easy default values and their columns, and select the columns that we desire. For example, we will add some values for medians, terrain, and area type. So, lets finish up!
+
+```{r, message=FALSE,warning=FALSE}
+linksFile <- one_auto_master %>%
+  mutate(
+    Length_Miles = Length_Mil, 
+    sl = Speed,
+    ft = as.character(FTCLASS),
+    lanes = LANES,
+    med = ifelse(ft == "Freeway", "Restrictive", "NonRestrictive"),
+    at = "Suburban",
+    terrain = "flat",
+    FF_SPD = Speed + 10
+ ) %>%
+ select(link_id,Oneway,DriveTime,Length_Miles,RoadClass,AADT,start_node,end_node,
+        ft,lanes,sl,med,at,terrain,capacity,FF_SPD)
+        #CAP1HL,FTCLASS,FF_SPD,AM_VOL,MD_VOL,PM_VOL)
+```
+
+Let's write the information to an excel sheet! Now we have a complete links.csv. 
+
+```{r, message=FALSE,warning=FALSE}
+linksFileExcel <- linksFile
+st_geometry(linksFileExcel) <- NULL
+write_csv(linksFileExcel,"links.csv")
+```
+
+```{r}
+paged_table(linksFileExcel)
+```
+
+## Validation
+Let's validate the data that we have, and make sure that it makes sense. We can do that by looking at specific values on a map. For example, we can separate capacity, FTCLASS, lanes, etc. into bins, and then either increase the width to show a higher value, and change the color. Let's make some maps!
+
+### Capacity
+
+```{r}
+#leaflet() %>%
+#  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+#  addPolylines(data = clct, group = "<600", color = "red") %>%
+#  addPolylines(data = exp, group = "600-800", color = "orange") %>%
+#  addPolylines(data = fw, group = "800-1000", color = "yellow") %>%
+#  addPolylines(data = loc, group = "1000-1500", color = "green") %>%
+#  addPolylines(data = ma, group = "Minor Arterials", color = "blue") %>%
+#  addPolylines(data = pa, group = "Principal Arterials", color = "purple") %>%
+#  addPolylines(data = badloc, group = "Local Roads w/ Freeway Vals", color = "pink") %>%
+#  addLayersControl(baseGroups = c("Mismatched Data"),overlayGroups = #c("Collectors","Expressways","Freeways","Local Roads","Minor Arterials","Principal Arterials","Local Roads w/ #Freeway Vals"),options = layersControlOptions(collapsed = FALSE))
+```
+
+
+### Lanes
+
+### FTCLASS
+
+### Speed
+
+### 
+
+
+The map below shows which links have link data (like capacities), and which ones do not.
+
+```{r}
+#caps <- auto_master_basic %>% filter(CAP1HL > 0)
+#nocaps <- auto_master_basic %>% filter(is.na(CAP1HL))
+
+#leaflet() %>%
+#  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+#  addPolylines(data = caps, group = "Capacities", color = "blue")%>%
+#  addPolylines(data = nocaps, group = "No Capacities", color = "red")%>%
+#  addLayersControl(overlayGroups = c("Roadways with Capacities"))
+```
+
+### Other stuff
+```{r}
+#master <- st_read("WFRC_data/TravelDemandModel/TDM_master_segments/Master_Segs_withFactors_20200504.shp") %>%
+#  st_transform(4326)
+#master_caps <- left_join(master,seg_summaries,by = "SEGID") %>% filter(CAP1HL>0)
+
+#master_freeways <- master_caps %>% filter(FTCLASS == "Freeway")
+```
+
+```{r}
+#leaflet() %>%
+#  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+#  addPolylines(data = auto_ramps, group = "master", color = "blue") %>%
+#  addLayersControl(overlayGroups = c("test"))
+```
+### helps
+ * R help: https://mrccsc.github.io/r-intermediate/4.summarise-and-combine.html
+ 
+
+
