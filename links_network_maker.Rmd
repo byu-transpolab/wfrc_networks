@@ -471,23 +471,52 @@ Simply by looking at the map, it is safe to assume that the NA values can be ass
 
 Note: After analysis in Via, it has been determined that all NA values were drawn in the opposite direction! (MatSim has agents travel in the direction that they were created.) The analysis shows that all NA values have mismatch to/from node information. So, we will need to switch that later on, so that agents can travel in the right direction on the right roads! Without switching the information, I-15 would only be able to be traveled in one direction! That's so silly.
 
-Let's switch the to/from node information for all NA oneway values, and then assign those NA values TF. Then we will change the TF and B to 1 and 0. 
+First, let's identify all the links that were drawn incorrectly by WFRC!
+```{r}
+# i need to find a way to identify ALL of backward/both drawn links
+backward_links<-c(
+  #random intersections
+  31957,31913,31881,31762,101205,101196,101216,101213,101212,101210,101206,101192,101193, 
+  #airplane links
+  95377,95638,95644,96175,96414,96857) 
+both <- c(
+  #random intersections
+  56297,56293,56286,56276,56271,56285,56257,56259,26421,72097,72145,72150,72158,72185,72191,76467,76477,
+  #bangeter highway
+  39064,39256,39285,39344,39329,39289,39261,39543,39549,40351,40386,44717,44765,
+  #taylorsville park
+  74925,74913,74912:74915,74917,74905:74909,74902,74899,74893)
+```
+
+NOw, let's switch the to/from node information for all NA oneway values, and then assign those NA values TF. Then we will change the TF and B to 1 and 0. 
 
 ```{r, message=FALSE,warning=FALSE}
+`%not in%` <- function (x, table) is.na(match(x, table, nomatch=NA_integer_))
+
 one_auto_master <- cap_ln_auto_master %>%
   mutate(
     start_node = case_when(
-      is.na(Oneway) ~ to_node,
-      is.na(Oneway)==FALSE ~ from_node),
+      is.na(Oneway) | link_id %in% backward_links ~ to_node,
+      is.na(Oneway)==FALSE & link_id %not in% backward_links~ from_node),
     end_node = case_when(
-      is.na(Oneway) ~ from_node,
-      is.na(Oneway)==FALSE ~ to_node),
+      is.na(Oneway) | link_id %in% backward_links ~ from_node,
+      is.na(Oneway)==FALSE & link_id %not in% backward_links ~ to_node),
     Oneway = case_when(
-      Oneway == "TF" ~ 1,
-      Oneway == "B" ~ 0,
+      Oneway == "TF" & link_id %not in% both ~ 1,
+      Oneway == "B" | link_id %in% both ~ 0,
       is.na(Oneway) ~ 1)
   )
 ```
+
+```{r}
+#onlyone <- one_auto_master %>% filter(Oneway>0)
+#duped<- onlyone[onlyone$end_node %in% onlyone$end_node[duplicated(onlyone$end_node)],]
+#leaflet() %>%
+#  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+#  addPolylines(data = duped, group = "ad boys", color = "red") %>%
+#  addLayersControl(overlayGroups = c("Backward Links"))
+```
+
 
 ## Final Result
 ### Final Table
@@ -509,6 +538,11 @@ linksFile <- one_auto_master %>%
         ft,lanes,sl,med,at,terrain,capacity,FF_SPD)
         #CAP1HL,FTCLASS,FF_SPD,AM_VOL,MD_VOL,PM_VOL)
 ```
+
+```{r}
+#st_write(linksFile, paste0(tempdir(), "/", ".shp")) #doesn't work perfectly
+```
+
 
 Let's write the information to an excel sheet! Now we have a complete links.csv. 
 
