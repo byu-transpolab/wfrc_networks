@@ -34,6 +34,10 @@ download_gbd <- function(){
 #' @param bb An object of class `sf` defining a study area.
 #' @param gdb_path A path to the WFRC MM database
 #' 
+#' @return A list with two objects:
+#'   - `links` An object of class `sf` with the link shapes and line attributes
+#'   - `nodes` An object of class `sf` with the node shapes
+#' 
 #' @details
 #' The algorithm works as follows:
 #'   - extract junctions from geodatabase and filter to junctions in `bb`
@@ -134,6 +138,8 @@ write_linknodes <- function(linknodeset, folder){
   # write links as CSV file
   readr::write_csv(linknodeset$links %>% sf::st_set_geometry(NULL), file.path(folder, "links.csv"))
   
+
+  
   # write nodes file
   linknodeset$nodes %>%
     dplyr::mutate(
@@ -142,6 +148,17 @@ write_linknodes <- function(linknodeset, folder){
     ) %>%
     sf::st_set_geometry(NULL) %>%
     readr::write_csv(file.path(folder, "nodes.csv"))
+  
+  # if there is a centroid frame, write it out also
+  if(!is.null(linknodeset$centroids)) {
+    linknodeset$nodes %>%
+      dplyr::mutate(
+        x = sf::st_coordinates(.)[, 1],
+        y = sf::st_coordinates(.)[, 2]
+      ) %>%
+      sf::st_set_geometry(NULL) %>%
+      readr::write_csv(file.path(folder, "centroids.csv"))
+  }
 }
 
 
