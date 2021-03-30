@@ -14,6 +14,84 @@ library(sf)
 library(stringi)
 ```
 
+```{r}
+source("R/build_linknode_tables.R")
+autoNet<-st_read("data/ArcGisJoins/AutoNetwork/AutoNetwork.shp")%>%st_transform(4326)%>%mutate(link_id=Link_Num)
+utaharea<-st_read("data/ArcGisJoins/utaharea/utaharea.shp")%>%
+    sf::st_transform(4326)
+#utah_net<-extract_roads(utaharea,"data/MM_NetworkDataset_03042021.gdb")
+#write_linknodes(utah_net, "data/utah")
+```
+
+```{r}
+#autoTest <- linksFile %>% filter(start_node == end_node)
+#  #filter(link_id==30093)
+#leaflet() %>%
+#  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+#  addPolylines(data = st_zm(autoTest), group = "Capacities", color = "blue")%>%
+#  #addPoints(data = mynodes, group = "No Capacities", color = "red")%>%
+#  addLayersControl(overlayGroups = c("Roadways with Capacities"))
+```
+
+```{r}
+  # to see the layers in the database
+  # st_layers(gdb_path)
+  
+  # get nodes from the dataset
+  nodes <- sf::st_read("data/MM_NetworkDataset_03042021.gdb", layer = "NetworkDataset_ND_Junctions") %>%
+    sf::st_transform(4326) %>%
+    # create a node id
+    dplyr::mutate(id = dplyr::row_number()) %>%
+    sf::st_filter(utaharea)
+
+  # Node identification =======
+  # The links don't have any node information on them. So let's extract the
+  # first and last points from each polyline. This actually extracts all of them
+  links <- autoNet %>%
+    dplyr::select(link_id) %>%
+    sf::st_cast("POINT") # WARNING: will generate n points for each point.
+  
+  # now we get the first point of each feature and find the nearest node
+  start_nodes <- links %>% 
+    dplyr::group_by(link_id) %>% dplyr::slice(1) %>%
+    sf::st_join(nodes, join = sf::st_nearest_feature) %>%
+    dplyr::rename(start_node = id)
+  
+  # and do the same for the last n() point of each feature
+  end_nodes <- links %>% 
+    dplyr::group_by(link_id) %>% dplyr::slice(dplyr::n()) %>%
+    sf::st_join(nodes, join = sf::st_nearest_feature) %>%
+    dplyr::rename(end_node = id)
+  
+  # put the node id's onto the links dataset
+  mylinks <- links %>%
+    dplyr::left_join(start_nodes %>% sf::st_set_geometry(NULL), by = "link_id") %>%
+    dplyr::left_join(end_nodes   %>% sf::st_set_geometry(NULL), by = "link_id")
+ 
+  # remove any nodes that are not part of link endpoints
+  mynodes <- nodes %>% 
+    dplyr::filter(id %in% mylinks$start_node | id %in% mylinks$end_node)
+  
+ 
+  # Return list of links and nodes ============
+  list(
+    links = mylinks,
+    nodes = mynodes
+  )
+  
+st_geometry(mylinks) <- NULL
+
+  # write nodes file
+  mynodes %>%
+    dplyr::mutate(
+      x = sf::st_coordinates(.)[, 1],
+      y = sf::st_coordinates(.)[, 2]
+    ) %>%
+    sf::st_set_geometry(NULL) %>%
+    readr::write_csv(file.path("data/utah", "nodes.csv"))
+```
+
+
 ## Introduction 
 ### Goal
 In this markdown, we create a full links.csv to use to create a network for the Utah area. More specifically, in beam, there is a method called "LinkTablesReader" that takes in a nodes.csv and links.csv files and spits out a network xml. We need to have accurate links and nodes files in order to create this network. So, we will do that.
@@ -58,9 +136,13 @@ Below is a picture of the Model Builder to explain the process as to how the mas
 
 Now we read in the joint file.
 ```{r,message=FALSE,results=FALSE}
-auto_master_basic <- st_read("data/ArcGisJoins/auto_master_basic/auto_master_basic.shp") %>%
+to_from <- mylinks %>% select(link_id,start_node,end_node)
+amb <- st_read("data/ArcGisJoins/auto_master_basic_agrc/auto_master_basic.shp") %>% 
+  mutate(link_id=Link_Num) %>%
   select(link_id,SEGID,Name,Oneway,Speed,DriveTime,Length_Mil,RoadClass,AADT) %>%
   st_transform(4326)
+auto_master_basic <-left_join(amb,to_from,by="link_id") %>%
+  select(link_id,SEGID,Name,Oneway,Speed,DriveTime,Length_Mil,RoadClass,AADT, start_node, end_node)
 ```
 
 ***
@@ -77,7 +159,8 @@ Below is the model builder to how the auto network was able to get information f
 Lets read in the data and join it onto the Auto Master Basic File. By doing so, we fix the missing freeway value problem.
 ```{r,message=FALSE,results=FALSE}
 # read in the freeways arcgis join file
-freeways <- st_read("data/ArcGisJoins/auto_master_freeway/auto_master_freeway.shp") %>%
+freeways <- st_read("data/ArcGisJoins/auto_master_freeway_agrc/auto_master_freeway.shp") %>% 
+  mutate(link_id=Link_Num) %>%
   select(link_id,SEGID,Name,Oneway,Speed,DriveTime,Length_Mil,RoadClass,AADT) %>%
   rename_at(vars(-1), ~ paste0(., '_fw'))
   st_geometry(freeways) <- NULL
@@ -94,7 +177,7 @@ auto_master_freeways <- left_join(auto_master_basic,freeways,by="link_id",keep=F
     RoadClass=coalesce(RoadClass_fw,RoadClass),
     RC = as.numeric(gsub("( ).*", "\\1", RoadClass)),
     AADT=coalesce(AADT_fw,AADT)
-  ) %>% select(1:8,19,9)
+  ) %>% select(1:11,21)
 ```
 
 We now have a basic table that has corrected freeway and separated highway links. 
@@ -113,7 +196,8 @@ The Model Builder explaining how this file was created is shown below. Notice ho
 Now we read in the data and join it onto the Auto Master file. 
 ```{r,message=FALSE,results=FALSE}
 #read in ramp information
-auto_tdm_ramps <- st_read("data/ArcGisJoins/auto_tdm_ramps/auto_tdm_ramps.shp") %>%
+auto_tdm_ramps <- st_read("data/ArcGisJoins/auto_tdm_ramps_agrc/auto_tdm_ramps.shp") %>% 
+  mutate(link_id=Link_Num) %>%
   select(link_id,RoadClass,STREET,SEGID,LANES,FTCLASS,ATYPENAME,FF_SPD,CAP1HR1LN) %>%
   rename_at(vars(-1), ~ paste0(., '_tdm')) %>%
   st_transform(4326)
@@ -134,8 +218,8 @@ Lets read in the segment summary data. We also read in a data table correspondin
 seg_summaries <- read.dbf("data/segment_summaries.dbf") %>%
   select(SEGID,CAP1HL,LANES,FT,FTCLASS,FF_SPD,AM_VOL,MD_VOL,PM_VOL)
 # read in links data csv to get to/from node info
-links_nodes <- read_csv("data/auto_links.csv") %>%
-  select(link_id,from_node,to_node)
+#links_nodes <- read_csv("data/auto_links.csv") %>%
+#  select(link_id,from_node,to_node)
 ```
 
 Also, there is a slight problem that we should fix that has to do with a coding eror with the SEGID field. About 20 SEGID values in this file have an extra number at the end. Lets fix that and then attach the segment summary information by using the common variable SEGID. The ArcGis combination file will then be ready for further analysis. We will call it Auto Master Joint. 
@@ -145,11 +229,11 @@ Also, there is a slight problem that we should fix that has to do with a coding 
 auto_master_fix <- auto_master_fwr %>%
   mutate(nchar = stri_length(SEGID),
          SEGID = ifelse(nchar < 11, as.character(SEGID), substr(SEGID, 1, nchar-1)))%>%
-  select(1:19)
+  select(1:21)
 #combine the auto_master_basic file with the data from the segment summaries and auto data
-auto_master_joint1 <- left_join(auto_master_fix,links_nodes,by="link_id")
-auto_master_joint <- left_join(auto_master_joint1,seg_summaries,by = "SEGID")%>%
-  select(1:10,19:28,11:18)
+#auto_master_joint1 <- left_join(auto_master_fix,links_nodes,by="link_id")
+auto_master_joint <- left_join(auto_master_fix,seg_summaries,by = "SEGID")
+#%>%select(1:10,19:28,11:18)
 ```
 
 The Auto Master Joint file represents the combination of all three ArcGis joins, as well as the segment summary data and the to from node information. We now have an improved form of the basic file. It is still not complete. We need to analyze its values to make sure then make sense, and if they don't fix them so that they do.
@@ -174,7 +258,7 @@ It looks like only 34 values with a RoadClass of Interstate are missing capacity
 ```{r, echo=FALSE, results=TRUE}
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
-  addPolylines(data = freewaycaps, group = "Capacities", color = "blue")%>%
+  addPolylines(data = st_zm(freewaycaps), group = "Capacities", color = "blue")%>%
   #addPolylines(data = nocaps, group = "No Capacities", color = "red")%>%
   addLayersControl(overlayGroups = c("Roadways with Capacities"))
 ```
@@ -192,7 +276,7 @@ It looks like there are 425 links that are classified as RoadClass Ramps, but do
 ```{r, echo=FALSE, results=TRUE}
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
-  addPolylines(data = rampscaps, group = "Capacities", color = "blue")%>%
+  addPolylines(data = st_zm(rampscaps), group = "Capacities", color = "blue")%>%
   #addPolylines(data = nocaps, group = "No Capacities", color = "red")%>%
   addLayersControl(overlayGroups = c("Ramps with Capacities"))
 ```
@@ -225,8 +309,8 @@ loc_high <- auto_master_joint %>%
 ```{r, echo=FALSE, results=TRUE}
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
-  addPolylines(data = loc_high, group = "Local Roads w/ FW Values", color = "red") %>%
-  addPolylines(data = fw_low, group = "FW w/ Local Roads Values", color = "blue") %>%
+  addPolylines(data = st_zm(loc_high), group = "Local Roads w/ FW Values", color = "red") %>%
+  addPolylines(data = st_zm(fw_low), group = "FW w/ Local Roads Values", color = "blue") %>%
   addLayersControl(overlayGroups = c("Bad Join Areas"))
 ```
 
@@ -271,13 +355,13 @@ badloc <- auto_master_joint %>% filter(RC == 1) %>% filter(FTCLASS != "Freeway")
 ```{r, echo=FALSE}
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
-  addPolylines(data = clct, group = "Collectors", color = "red") %>%
-  addPolylines(data = exp, group = "Expressways", color = "orange") %>%
-  addPolylines(data = fw, group = "Freeways", color = "yellow") %>%
-  addPolylines(data = loc, group = "Local Roads", color = "green") %>%
-  addPolylines(data = ma, group = "Minor Arterials", color = "blue") %>%
-  addPolylines(data = pa, group = "Principal Arterials", color = "purple") %>%
-  addPolylines(data = badloc, group = "Local Roads w/ Freeway Vals", color = "pink") %>%
+  addPolylines(data = st_zm(clct), group = "Collectors", color = "red") %>%
+  addPolylines(data = st_zm(exp), group = "Expressways", color = "orange") %>%
+  addPolylines(data = st_zm(fw), group = "Freeways", color = "yellow") %>%
+  addPolylines(data = st_zm(loc), group = "Local Roads", color = "green") %>%
+  addPolylines(data = st_zm(ma), group = "Minor Arterials", color = "blue") %>%
+  addPolylines(data = st_zm(pa), group = "Principal Arterials", color = "purple") %>%
+  addPolylines(data = st_zm(badloc), group = "Local Roads w/ Freeway Vals", color = "pink") %>%
   addLayersControl(baseGroups = c("Mismatched Data"),overlayGroups = c("Collectors","Expressways","Freeways","Local Roads","Minor Arterials","Principal Arterials","Local Roads w/ Freeway Vals"),options = layersControlOptions(collapsed = FALSE))
 ```
 
@@ -416,11 +500,11 @@ cap_ave
 The table above applies to most values. The exception would be the links that have an RC=7 (ramps). Their default values are shown below, and their normal values are determined from the TDM values. 
 
 ```{r, echo = FALSE, message=FALSE,warning=FALSE}
-ramp_ave <- clean_auto_master %>%
-  filter(RoadClass_tdm == "7 Ramps, Collectors") %>%
-  summarize(mean_cap = mean(CAP1HR1LN_tdm), mean_ln = mean(LANES_tdm))
-st_geometry(ramp_ave) <- NULL
-ramp_ave
+#ramp_ave <- clean_auto_master %>%
+#  filter(RoadClass_tdm == "7 Ramps, Collectors") %>%
+#  summarize(mean_cap = mean(CAP1HR1LN_tdm), mean_ln = mean(LANES_tdm))
+#st_geometry(ramp_ave) <- NULL
+#ramp_ave
 ```
 
 We can use these averages for default values. Lets input the default values for CAP1HL and LANES into the joint table.
@@ -431,11 +515,11 @@ cap_ln_auto_master <- ftclean_auto_master %>%
     CAP1HL = case_when(
       is.na(CAP1HR1LN_tdm)==FALSE ~ as.numeric(CAP1HR1LN_tdm),
       is.na(CAP1HL) & FTCLASS == "Collector" ~ 680,
-      is.na(CAP1HL) & FTCLASS == "Expressway" ~ 981,
-      is.na(CAP1HL) & FTCLASS == "Freeway" ~ 1778,
+      is.na(CAP1HL) & FTCLASS == "Expressway" ~ 978,
+      is.na(CAP1HL) & FTCLASS == "Freeway" ~ 1772,
       is.na(CAP1HL) & FTCLASS == "Minor Arterial" ~ 865,
-      is.na(CAP1HL) & FTCLASS == "Principal Arterial" ~ 916,
-      is.na(CAP1HL) & FTCLASS == "Local" ~ 400,
+      is.na(CAP1HL) & FTCLASS == "Principal Arterial" ~ 915,
+      is.na(CAP1HL) & FTCLASS == "Local" ~ 462,
       is.na(CAP1HL) & FTCLASS == "Ramp" ~ 1244,
       TRUE ~ as.numeric(CAP1HL)),
     LANES = case_when(
@@ -463,8 +547,8 @@ tf_onewway <- clean_auto_master %>% filter(Oneway=="TF")
 
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
-  addPolylines(data = na_onewway, group = "NA", color = "red") %>%
-  addPolylines(data = tf_onewway, group = "TF", color = "blue") %>%
+  addPolylines(data = st_zm(na_onewway), group = "NA", color = "red") %>%
+  addPolylines(data = st_zm(tf_onewway), group = "TF", color = "blue") %>%
   addLayersControl(baseGroups = c("Oneway Values"),overlayGroups = c("NA","TF"),options = layersControlOptions(collapsed = FALSE))
 ```
 Simply by looking at the map, it is safe to assume that the NA values can be assumed to be TF, or oneway links. 
@@ -474,18 +558,18 @@ Note: After analysis in Via, it has been determined that all NA values were draw
 First, let's identify all the links that were drawn incorrectly by WFRC!
 ```{r}
 # i need to find a way to identify ALL of backward/both drawn links
-backward_links<-c(
+#backward_links<-c(
   #random intersections
-  31957,31913,31881,31762,101205,101196,101216,101213,101212,101210,101206,101192,101193, 
+#  31957,31913,31881,31762,101205,101196,101216,101213,101212,101210,101206,101192,101193, 
   #airplane links
-  95377,95638,95644,96175,96414,96857) 
-both <- c(
+#  95377,95638,95644,96175,96414,96857) 
+#both <- c(
   #random intersections
-  56297,56293,56286,56276,56271,56285,56257,56259,26421,72097,72145,72150,72158,72185,72191,76467,76477,
+#  56297,56293,56286,56276,56271,56285,56257,56259,26421,72097,72145,72150,72158,72185,72191,76467,76477,
   #bangeter highway
-  39064,39256,39285,39344,39329,39289,39261,39543,39549,40351,40386,44717,44765,
+#  39064,39256,39285,39344,39329,39289,39261,39543,39549,40351,40386,44717,44765,
   #taylorsville park
-  74925,74913,74912:74915,74917,74905:74909,74902,74899,74893)
+#  74925,74913,74912:74915,74917,74905:74909,74902,74899,74893)
 ```
 
 NOw, let's switch the to/from node information for all NA oneway values, and then assign those NA values TF. Then we will change the TF and B to 1 and 0. 
@@ -495,15 +579,16 @@ NOw, let's switch the to/from node information for all NA oneway values, and the
 
 one_auto_master <- cap_ln_auto_master %>%
   mutate(
+    to_node = end_node, from_node = start_node,
     start_node = case_when(
-      is.na(Oneway) | link_id %in% backward_links ~ to_node,
-      is.na(Oneway)==FALSE & link_id %not in% backward_links~ from_node),
+      is.na(Oneway) ~ to_node,
+      is.na(Oneway)==FALSE ~ from_node),
     end_node = case_when(
-      is.na(Oneway) | link_id %in% backward_links ~ from_node,
-      is.na(Oneway)==FALSE & link_id %not in% backward_links ~ to_node),
+      is.na(Oneway) ~ from_node,
+      is.na(Oneway)==FALSE ~ to_node),
     Oneway = case_when(
-      Oneway == "TF" & link_id %not in% both ~ 1,
-      Oneway == "B" | link_id %in% both ~ 0,
+      Oneway == "TF" ~ 1,
+      Oneway == "B" ~ 0,
       is.na(Oneway) ~ 1)
   )
 ```
@@ -549,7 +634,7 @@ Let's write the information to an excel sheet! Now we have a complete links.csv.
 ```{r, message=FALSE,warning=FALSE}
 linksFileExcel <- linksFile
 st_geometry(linksFileExcel) <- NULL
-write_csv(linksFileExcel,"links.csv")
+write_csv(linksFileExcel,"data/utah/links.csv")
 ```
 
 ```{r}
