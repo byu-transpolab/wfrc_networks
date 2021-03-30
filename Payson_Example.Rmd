@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(sf)
 library(tidyverse)
+library(leaflet)
 ```
 
 
@@ -42,6 +43,23 @@ payson_net <- extract_roads(payson, "data/MM_NetworkDataset_03042021.gdb/")
 
 plot(payson_net$links[, "speed"])
 ```
+
+
+Now that we have this network, we need to join the travel demand model
+information to it.
+
+```{r segments}
+segs_with_factors <- st_read("data/segs_with_factors.geojson")
+seggment
+```
+
+```{r map}
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = payson_net$links, color = "black") %>%
+  addPolylines(data = segs_with_factors, color = "red")
+```
+
 
 
 We can then write out the network to a set of files
