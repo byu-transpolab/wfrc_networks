@@ -1,0 +1,40 @@
+---
+title: "OSM_Network_Creator"
+author: "Chris Day"
+date: "3/25/2021"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+library(tidyverse)
+library(leaflet)
+```
+
+
+Let's create  a network for the Payson region. We will create a bounding box
+for the area we want to look at.
+
+```{r region}
+utah_osm <- st_read("osm/utah-box.geojson")
+```
+
+```{r}
+unique_highways <- unique(utah_osm$highway) %>% as.tibble
+unique_highways
+```
+
+```{r}
+good_roads<- utah_osm %>% filter(highway %in% c("unclassified","residential","secondary","motorway_link","secondary_link","tertiary","trunk_link","trunk","primary","primary_link","motorway","tertiary_link","construction"))
+
+bad_roads<- utah_osm %>% filter(highway %in% c("track","path","proposed","cycleway","road","living_street","trail","pedestrian","steps","abandoned","traffic_signals","bridleway","planned","raceway","elevator","demolished","bus_stop"))
+```
+
+
+```{r}
+test_road<- utah_osm %>% filter(highway=="construction")
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = test_road, group = "NA", color = "red") %>%
+  addLayersControl(overlayGroups = c("Backward Links"))
+```
