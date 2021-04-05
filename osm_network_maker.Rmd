@@ -11,9 +11,17 @@ library(tidyverse)
 library(leaflet)
 ```
 
+On a basic BEAM run, you need an Open Street Map file of the area you want to simulate. Nate needs an osm file of just highway links. This markdown explains how to create the osm needed for his BEAM run for the area of Utah. 
 
-Let's create  a network for the Payson region. We will create a bounding box
-for the area we want to look at.
+Note: For this to work, the user must have osmosis downloaded and set to run in the command line. Instructions are shown here: https://wiki.openstreetmap.org/wiki/Osmosis/Quick_Install_(Windows)
+
+First, lets download the basic osm file from GeoFabrik.com.
+
+```{r}
+#osm_download <- download.file("https://download.geofabrik.de/north-america/us/utah-latest.osm.pbf","osm/utah-latest.osm.pbf")
+```
+
+Next, we need to determine which roads we want to keep, and which ones we want to get rid of. Lets look at a geojson which represents the osm file we just downloaded. 
 
 ```{r region}
 utah_osm <- st_read("osm/utah-box.geojson")
@@ -30,11 +38,31 @@ good_roads<- utah_osm %>% filter(highway %in% c("unclassified","residential","se
 bad_roads<- utah_osm %>% filter(highway %in% c("track","path","proposed","cycleway","road","living_street","trail","pedestrian","steps","abandoned","traffic_signals","bridleway","planned","raceway","elevator","demolished","bus_stop"))
 ```
 
+I used this map to test what each type of highway looked like on a map. Just for reference, construction links are shown below.
 
 ```{r}
 test_road<- utah_osm %>% filter(highway=="construction")
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
   addPolylines(data = test_road, group = "NA", color = "red") %>%
-  addLayersControl(overlayGroups = c("Backward Links"))
+  addLayersControl(overlayGroups = c("Test Links"))
 ```
+
+After analyzing all of the link options, a list of roads that we want to keep in the highways network is determined. The ones in the "good_roads" variable show these values. 
+
+The last thing we need to do is run the command line osmosis tool that extracts the highway links we desire. The command to run is shown below.
+
+    D:\programs\osmosis-0.48.3\bin\osmosis.bat --read-pbf utah-latest-box.osm.pbf --tf accept-ways highway=unclassified,residential,secondary,motorway_link,secondary_link,tertiary, trunk_link,trunk,primary,primary_link,motorway,tertiary_link,construction --used-node --write-pbf utah-highways.osm.pbf
+
+An explanation of this can also be seen at this link: https://wiki.openstreetmap.org/wiki/Osmosis#Windows
+
+Now we have a just highways osm made network file that BEAM can use as a basic input. Woo Hoo!
+
+Also, I tried to do this all in R, without using the command line, but I couldn't figure it out. Here are some sites that might be helpful if I were to convert this to all in R.
+
+ *  https://cran.r-project.org/web/packages/osmar/osmar.pdf
+ *  https://rpubs.com/scvetojevic/r_navigator
+ 
+
+
+
