@@ -81,7 +81,6 @@ freeways <- st_read("data/ArcGisJoins/auto_master_freeway/auto_master_freeway.sh
   select(link_id,SEGID,Name,Oneway,Speed,DriveTime,Length_Mil,RoadClass,AADT) %>%
   rename_at(vars(-1), ~ paste0(., '_fw'))
   st_geometry(freeways) <- NULL
-
 #replace all the values from the basic file with the values from the freeways file  
 auto_master_freeways <- left_join(auto_master_basic,freeways,by="link_id",keep=FALSE) %>%
   mutate(
@@ -460,7 +459,6 @@ First, we need to see if our data looks good so far. Let's take a look at a map 
 ```{r, echo=FALSE}
 na_onewway <- clean_auto_master %>% filter(is.na(Oneway))
 tf_onewway <- clean_auto_master %>% filter(Oneway=="TF")
-
 leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
   addPolylines(data = na_onewway, group = "NA", color = "red") %>%
@@ -492,7 +490,6 @@ NOw, let's switch the to/from node information for all NA oneway values, and the
 
 ```{r, message=FALSE,warning=FALSE}
 `%not in%` <- function (x, table) is.na(match(x, table, nomatch=NA_integer_))
-
 one_auto_master <- cap_ln_auto_master %>%
   mutate(
     start_node = case_when(
@@ -518,12 +515,81 @@ one_auto_master <- cap_ln_auto_master %>%
 ```
 
 
+## Ramp Problem
+There is a problem where the agents aren't using the ramps. Lets solve that ish
+
+read in nodes
+```{r}
+nodeshp <- st_read("data/ArcGisJoins/AutoNetwork/nodes.shp") %>% st_transform(4326)
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addMarkers(data = nodeshp, group = "Capacities")%>%
+  #addPolylines(data = nocaps, group = "No Capacities", color = "red")%>%
+  addLayersControl(overlayGroups = c("Roadways with Capacities"))
+```
+
+determine nodes that are part of problem
+```{r}
+ramp_s <- one_auto_master %>% group_by(start_node) %>% filter(n()>1)  %>% filter(RC==7)
+ramp_e <- one_auto_master %>% group_by(end_node) %>% filter(n()>1)  %>% filter(RC==7)
+
+badstartlinks <- one_auto_master %>% group_by(start_node) %>% filter(n()>1) %>% filter(FTCLASS=="Freeway") %>% filter(start_node %not in% ramp_s$start_node)
+badendlinks <- one_auto_master %>% group_by(end_node) %>% filter(n()>1) %>% filter(FTCLASS=="Freeway") %>% filter(end_node %not in% ramp_e$end_node)
+
+badstartnodes <- nodeshp %>% filter(node_id %in% badstartlinks$start_node)
+badendnodes<- nodeshp %>% filter(node_id %in% badendlinks$end_node)
+
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  #addMarkers(data = badnodess, group = "Capacities")%>%
+  addMarkers(data=badstartnodes,group="caps")%>%
+  addMarkers(data=badendnodes,group="caps")%>%
+  #addPolylines(data = badstartlinks, group = "Capacities", color = "red")%>%
+  #addPolylines(data = badendlinks, group = "Capacities2", color = "blue")%>%
+  addLayersControl(overlayGroups = c("Freeways"))
+```
+
+create a set of new set of nodes
+```{r}
+#newnodes <- badnodess %>% mutate(node_id = paste(node_id,sep="","_2"))
+newnodes <- badendnodes %>% mutate(node_id = node_id+1000000000)
+newnodes2 <- badstartnodes %>% filter(node_id %not in% (badendnodes$node_id))%>% mutate(node_id = node_id+1000000000)
+```
+
+create the full nodes excel output that has all nodes on it
+```{r}
+st_geometry(nodeshp) <- NULL
+st_geometry(newnodes) <- NULL
+st_geometry(newnodes2) <- NULL
+fullnodes<- rbind(nodeshp,newnodes) 
+fullnodes2<- rbind(fullnodes,newnodes2) %>% mutate(id=node_id,x=xcoord,y=ycoord)%>%select(id,x,y)
+write_csv(fullnodes2,"data/utah/nodes_ramps.csv")
+```
+
+replace links in og file that match the ones found above to replace their start nodes with the ones just created
+```{r}
+one_auto_master2 <- one_auto_master %>%
+  mutate(
+    start_node = case_when(
+      #link_id %in% badstartlinks$link_id ~ paste(start_node,sep="","_2"),
+      link_id %in% badstartlinks$link_id ~ start_node+1000000000,
+      link_id %not in% badstartlinks$link_id ~ start_node
+    ),
+    end_node = case_when(
+      #link_id %in% badendlinks$link_id ~ paste(end_node,sep="","_2"),
+      link_id %in% badendlinks$link_id ~ end_node+1000000000,
+      link_id %not in% badendlinks$link_id ~ end_node
+    )
+  )
+```
+
+
 ## Final Result
 ### Final Table
 The last step is to add the last, easy default values and their columns, and select the columns that we desire. For example, we will add some values for medians, terrain, and area type. So, lets finish up!
 
 ```{r, message=FALSE,warning=FALSE}
-linksFile <- one_auto_master %>%
+linksFile <- one_auto_master2 %>%
   mutate(
     Length_Miles = Length_Mil, 
     sl = Speed,
@@ -543,13 +609,12 @@ linksFile <- one_auto_master %>%
 #st_write(linksFile, paste0(tempdir(), "/", ".shp")) #doesn't work perfectly
 ```
 
-
 Let's write the information to an excel sheet! Now we have a complete links.csv. 
 
 ```{r, message=FALSE,warning=FALSE}
 linksFileExcel <- linksFile
 st_geometry(linksFileExcel) <- NULL
-write_csv(linksFileExcel,"data/utah/links_orig.csv")
+write_csv(linksFileExcel,"data/utah/links_ramps.csv")
 ```
 
 ```{r}
@@ -589,7 +654,6 @@ The map below shows which links have link data (like capacities), and which ones
 ```{r}
 #caps <- auto_master_basic %>% filter(CAP1HL > 0)
 #nocaps <- auto_master_basic %>% filter(is.na(CAP1HL))
-
 #leaflet() %>%
 #  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
 #  addPolylines(data = caps, group = "Capacities", color = "blue")%>%
@@ -602,7 +666,6 @@ The map below shows which links have link data (like capacities), and which ones
 #master <- st_read("WFRC_data/TravelDemandModel/TDM_master_segments/Master_Segs_withFactors_20200504.shp") %>%
 #  st_transform(4326)
 #master_caps <- left_join(master,seg_summaries,by = "SEGID") %>% filter(CAP1HL>0)
-
 #master_freeways <- master_caps %>% filter(FTCLASS == "Freeway")
 ```
 
@@ -614,6 +677,3 @@ The map below shows which links have link data (like capacities), and which ones
 ```
 ### helps
  * R help: https://mrccsc.github.io/r-intermediate/4.summarise-and-combine.html
- 
-
-
