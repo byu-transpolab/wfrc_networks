@@ -549,7 +549,7 @@ Let's write the information to an excel sheet! Now we have a complete links.csv.
 ```{r, message=FALSE,warning=FALSE}
 linksFileExcel <- linksFile
 st_geometry(linksFileExcel) <- NULL
-write_csv(linksFileExcel,"links.csv")
+write_csv(linksFileExcel,"data/utah/links_orig.csv")
 ```
 
 ```{r}
