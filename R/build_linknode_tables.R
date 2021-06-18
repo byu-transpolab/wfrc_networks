@@ -67,7 +67,12 @@ extract_roads <- function(bb, gdb_path){
     dplyr::transmute(
       link_id = dplyr::row_number(), 
       aadt = ifelse(AADT == 0, NA, AADT),
-      oneway = ifelse(is.na(Oneway), "FT", Oneway),
+      # the "oneway" field can take three values
+      oneway = case_when(
+        Oneway == "B" ~ 0,  # link goes in both directions
+        Oneway == "TF" ~ 1, # link goes in drawn order
+        Oneway == "" ~ 2    # link goes against drawn order!
+      ),
       length = Length_Miles,
       speed = Speed, 
       ftype = gsub(".*?([0-9]+).*", "\\1", RoadClass),
@@ -86,22 +91,30 @@ extract_roads <- function(bb, gdb_path){
   start_nodes <- link_points %>% 
     dplyr::group_by(link_id) %>% dplyr::slice(1) %>%
     sf::st_join(nodes, join = sf::st_nearest_feature) %>%
-    dplyr::rename(start_node = id)
+    dplyr::rename(a = id)
   
   # and do the same for the last n() point of each feature
   end_nodes <- link_points %>% 
     dplyr::group_by(link_id) %>% dplyr::slice(dplyr::n()) %>%
     sf::st_join(nodes, join = sf::st_nearest_feature) %>%
-    dplyr::rename(end_node = id)
+    dplyr::rename(b = id)
   
   # put the node id's onto the links dataset
   mylinks <- links %>%
     dplyr::left_join(start_nodes %>% sf::st_set_geometry(NULL), by = "link_id") %>%
-    dplyr::left_join(end_nodes   %>% sf::st_set_geometry(NULL), by = "link_id")
+    dplyr::left_join(end_nodes   %>% sf::st_set_geometry(NULL), by = "link_id") %>%
+    # If the link goes against the drawn order, replace a and b
+    mutate(
+      new_a = ifelse(oneway == 2, b, a),
+      new_b = ifelse(oneway == 2, a, b),
+      a = new_a,
+      b = new_b
+    ) %>%
+    select(-new_a, -new_b)
  
   # remove any nodes that are not part of link endpoints
   mynodes <- nodes %>% 
-    dplyr::filter(id %in% mylinks$start_node | id %in% mylinks$end_node)
+    dplyr::filter(id %in% mylinks$a | id %in% mylinks$b)
   
  
   # Return list of links and nodes ============
