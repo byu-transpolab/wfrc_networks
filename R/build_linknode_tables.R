@@ -13,12 +13,11 @@
 #' and available on the PATH.
 #' 
 #' @importFrom stringr str_c
-download_gbd <- function(){
-  filegdb <- "data/MM_NetworkDataset_03042021.gdb"
+download_gdb <- function(filegdb){
   if(!file.exists(filegdb)) {
     zippedgdb <- "data/agrc_network.zip"
     if(!file.exists(zippedgdb)) {
-      download.file("https://byu.box.com/shared/static/bowvzfgciuggw936n0fmw1je9a3t5794.zip",
+      download.file("https://byu.box.com/shared/static/o2sc6ozzb0j62n3u5gdw2uakj8pfhrvr.zip",
                     zippedgdb)
     }
     system2("7z", c("e", zippedgdb, stringr::str_c("-o", filegdb)) )
@@ -26,6 +25,8 @@ download_gbd <- function(){
   } else {
     message("File is already available")
   }
+  
+  return(filegdb)
 }
 
 #' Extract the roadway links and associated nodes from the WFRC network 
@@ -61,8 +62,12 @@ extract_roads <- function(bb, gdb_path){
     sf::st_filter(bb)
     
   # get auto_links
-  links <- sf::st_read(gdb_path, layer = "AutoNetwork") %>%
+  links <- sf::st_read(gdb_path, layer = "BikePedAuto") %>%
     sf::st_transform(4326) %>%
+    dplyr::filter(AutoNetwork == "Y") %>%
+    st_cast(., "MULTILINESTRING") %>% 
+    sf::st_filter(bb)  %>%
+    
     # create a link id and get other attributes
     dplyr::transmute(
       link_id = dplyr::row_number(), 
@@ -75,9 +80,17 @@ extract_roads <- function(bb, gdb_path){
       ),
       length = Length_Miles,
       speed = Speed, 
-      ftype = gsub(".*?([0-9]+).*", "\\1", RoadClass),
-    ) %>%
-    sf::st_filter(bb)
+      ftype = gsub(".*?([0-9]+).*", "\\1", CartoCode),
+      fdesc = case_when(
+        ftype %in% c(1, 2, 4) ~ "Freeway",
+        ftype %in% c(3, 5) ~ "Principal Arterial",
+        ftype %in% c(7) ~ "Ramp",
+        ftype %in% c(8) ~ "Arterial",
+        ftype %in% c(10) ~ "Collector",
+        ftype %in% c(11) ~ "Local",
+        TRUE ~ as.character(NA)
+      )
+    ) 
     
   
   # Node identification =======
