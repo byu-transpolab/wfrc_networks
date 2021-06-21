@@ -139,6 +139,27 @@ extract_roads <- function(bb, gdb_path){
 }
 
 
+get_segments <- function(summaries_file, segments_file, bb){
+  
+  summaries <- foreign::read.dbf(summaries_file) 
+  segments <- st_read(segments_file) 
+  
+  
+  joined <- inner_join(
+    segments %>%
+      select(SEGID),
+    summaries %>% 
+      as_tibble() %>%
+      filter(STREET != "Cent") %>%
+      select(SEGID, LINKID, LANES, FT, FTCLASS, CAP1HR1LN, FF_SPD, PM_TIME, DISTANCE) %>%
+      mutate(CAPACITY = CAP1HR1LN * LANES),
+    by = "SEGID"
+  )
+  
+  joined
+  
+}
+
 
 #' Write link and node sets to CSV files
 #' 
