@@ -17,7 +17,7 @@ tar_option_set(packages = c("tidyverse", "sf"))
 
 # End this file with a list of target objects.
 list(
-  tar_target(gdb, download_gdb("data/UtahRoadsNetworkAnalysis.gdb"), 
+  tar_target(gdb, download_gdb("data/MM_NetworkDataset_06032021.gdb"), 
              format = "file"),
   tar_target(bb,  st_read("data/payson_bb.geojson")),
   tar_target(linknodes, extract_roads(bb, gdb)),
