@@ -23,9 +23,10 @@ list(
   tar_target(linknodes, extract_roads(bb, gdb)),
   
   
-  tar_target(segment_data, get_segments("data/v831_SE19_Net19__Summary.dbf", 
-                                        "data/segs_with_factors.geojson", 
-                                        bb)),
+  tar_target(segment_data, 
+             get_segments("data/v831_SE19_Net19__Summary.dbf", 
+                          "data/v831_SE19_Net19__Summary_nodes.dbf",
+                          bb)),
   
   #tar_target(attributed_net)
   

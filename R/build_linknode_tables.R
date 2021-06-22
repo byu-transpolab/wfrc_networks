@@ -139,22 +139,55 @@ extract_roads <- function(bb, gdb_path){
 }
 
 
-get_segments <- function(summaries_file, segments_file, bb){
+#' Get the TDM segments and related information
+#' 
+#' @param summaries_file Path to the TDM model summaries file
+#' @param nodes_file Path to the TDM model summaries nodes file
+#' @param bb A bounding box polygon
+#' 
+#' @return A list with two sf objects: links and nodes
+get_segments <- function(summaries_file, nodes_file, bb){
   
-  summaries <- foreign::read.dbf(summaries_file) 
-  segments <- st_read(segments_file) 
+  
+  # get nodes with xy coords from travel demand model network file
+  tdm_nodes <- foreign::read.dbf(nodes_file) %>%
+    st_as_sf(coords = c("X", "Y"), crs = 3719) %>%
+    st_filter(st_transform(bb, 3719)) %>%
+    select(N)
+  
+  # get link information from travel demand model network file
+  tdm_links <- foreign::read.dbf(summaries_file) %>%
+    as_tibble() %>%
+    filter(STREET != "Cent") %>%
+    filter(A %in% tdm_nodes$N & B %in% tdm_nodes$N) %>%
+    transmute(
+      LINKID, A, B, 
+      LANES,
+      FT, FTCLASS,
+      CAPACITY = CAP1HR1LN * LANES
+    ) 
+  
+  # make a linestring geometry for each link.
+  tdm_linestrings <- tdm_links %>%
+    select(LINKID, A, B) %>%
+    pivot_longer(A:B, names_to = "end", values_to = "N") %>%
+    left_join(tdm_nodes, by = "N") %>%
+    st_set_geometry("geometry")  %>%
+    group_by(LINKID) %>%
+    summarise() %>%
+    st_cast("MULTILINESTRING")
   
   
-  joined <- inner_join(
-    segments %>%
-      select(SEGID),
-    summaries %>% 
-      as_tibble() %>%
-      filter(STREET != "Cent") %>%
-      select(SEGID, LINKID, LANES, FT, FTCLASS, CAP1HR1LN, FF_SPD, PM_TIME, DISTANCE) %>%
-      mutate(CAPACITY = CAP1HR1LN * LANES),
-    by = "SEGID"
+  tdm_links_sf <- tdm_links %>%
+    left_join(tdm_linestrings, by = "LINKID") %>%
+    st_set_geometry("geometry") 
+  
+  
+  list(
+    "links" = tdm_links_sf,
+    "nodes" = tdm_nodes
   )
+}
   
   joined
   
