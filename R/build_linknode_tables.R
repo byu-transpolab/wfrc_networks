@@ -90,7 +90,8 @@ extract_roads <- function(bb, gdb_path){
         ftype %in% c(11) ~ "Local",
         TRUE ~ as.character(NA)
       )
-    ) 
+    ) %>%
+    filter(!is.na(fdesc))
     
   
   # Node identification =======
