@@ -345,6 +345,8 @@ write_linknodes <- function(linknodeset, folder){
       sf::st_set_geometry(NULL) %>%
       readr::write_csv(file.path(folder, "centroids.csv"))
   }
+  
+  file.path(folder, "network.geojson")
 }
 
 
