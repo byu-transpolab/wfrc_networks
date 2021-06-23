@@ -188,10 +188,83 @@ get_segments <- function(summaries_file, nodes_file, bb){
     "nodes" = tdm_nodes
   )
 }
+
+
+#' Join segment data to network
+#' 
+#' @param linknodes A list of `links` and `nodes` sf objects with roadway links
+#' @param segment_data A list of `links` and `nodes` sf objects with travel demand
+#'   model network information
+#' @param link_types A character vector describing values of `linknodes$links$fdesc` 
+#'  that should be kept
+#' @param segment_types A character vector describing values of `segment_data$links$FTCLASS`
+#'  that should be kept
+#' @param buffer A distance (in meters) to buffer the links and segments when 
+#'
+#' @details Filters links from the streets network and the TDM segments to 
+#'   similar facility types. Buffers the 
+#' 
+#' @return link nodes with added columns
+#' 
+join_segments <- function(linknodes, segment_data, link_types, segment_types, buffer = 60){
   
-  joined
+  # make a buffer around the links in the specified link_types
+  links <-  linknodes$links %>%
+    st_transform(st_crs(segment_data$links)) %>%
+    filter(fdesc %in% link_types)  %>%
+    st_buffer(buffer)
+    
+  # keep segments in the TDM network from the specified segment_types
+  segments <- segment_data$links %>%
+    filter(FTCLASS %in% segment_types)
+  
+  # find nodes in the TDM network that lie inside the buffers.
+  segment_nodes <- segment_data$nodes %>%
+    filter(N %in% segments$A | N %in% segments$B) 
+  
+  # filter the segments down to the matched links, and buffer them.
+  segment_buffer <- segments %>%
+    filter(A %in% segment_nodes$N & B %in% segment_nodes$N)  %>%
+    st_buffer(buffer) 
+   
+  # calculate intersection between two buffers
+  intersecting_areas <- st_intersection(
+    links, 
+    segment_buffer %>% 
+      # fields from TDM segments to keep
+      select(LINKID, LANES, CAPACITY)) %>%
+    
+    # calculate area of intersection, and pick the single intersection with the 
+    # most overlap 
+    mutate(intersect_area = st_area(.)) %>%
+    group_by(link_id)  %>%
+    arrange(-intersect_area, .by_group = TRUE) %>%
+    slice(1)
+  
+  
+  intersecting_areas %>%
+    st_set_geometry(NULL)
+    
+}
+  
+
+#' Join all segments to network
+#' 
+#' @param linknodes A list of `links` and `nodes` sf objects with roadway links
+#' @param segment_data A list of `links` and `nodes` sf objects with travel demand
+#'   model network information
+#' 
+#' 
+#' 
+join_all_segments <- function(){
+  
+  
   
 }
+  
+  
+
+
 
 
 #' Write link and node sets to CSV files
