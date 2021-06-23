@@ -244,7 +244,8 @@ join_segments <- function(linknodes, segment_data, link_types, segment_types, bu
   
   
   intersecting_areas %>%
-    st_set_geometry(NULL)
+    st_set_geometry(NULL) %>%
+    select(link_id, tdm_id = LINKID, lanes = LANES, capacity = CAPACITY)
     
 }
   
@@ -255,12 +256,43 @@ join_segments <- function(linknodes, segment_data, link_types, segment_types, bu
 #' @param segment_data A list of `links` and `nodes` sf objects with travel demand
 #'   model network information
 #' 
+#' @return The linknodes list with lanes and capacity attributes appended
 #' 
-#' 
-join_all_segments <- function(){
+join_all_segments <- function(linknodes, segment_data){
   
+  # A map correlating the functional types in the link data (l) and the segment data(s)
+  type_lookup <- list(
+    "Freeway"  = list(l = c("Freeway"), s = c("Freeway", "Expressway"), buffer = 60),
+    "Ramp"     = list(l = c("Ramp"),    s = c("Ramp"), buffer = 60),
+    "Arterial" = list(l = c("Principal Arterial", "Arterial"),  
+                      s = c("Expressway", "Principal Arterial", "Minor Arterial"), buffer = 60),
+    "Collector"= list(l = c("Collector"), s = c("Collector", "Minor Arterial"), buffer = 60)
+  )
   
+  # Code to plot links and segments on top of each other (in debugging)
+  plot(linknodes$links[which(linknodes$links$fdesc %in% c("Principal Arterial", "Arterial")), "fdesc"], reset = FALSE)
+  plot(st_transform(segment_data$links, 4326)[which(segment_data$links$FTCLASS %in% c("Principal Arterial", "Minor Arterial")), "FTCLASS"], add = TRUE)
   
+  # loop through the map, joining attributes from the TDM segments onto the 
+  # corresponding links
+  segment_attributes <- lapply(type_lookup, function(type){
+    join_segments( linknodes, segment_data, type$l, type$s, type$buffer)
+  }) %>%
+    bind_rows(.id = "join_fclass")
+  
+  # join info back onto link data
+  linknodes$links <- left_join(
+    linknodes$links,
+    segment_attributes,
+    by = "link_id"
+  ) %>%
+    # if the road is missing capacity, assume one lane and 800 v/hr capacity
+    mutate(
+      capacity = ifelse(is.na(capacity), 800, capacity),
+      lanes = ifelse(is.na(lanes), 1, lanes)
+    )
+  
+  linknodes
 }
   
   
