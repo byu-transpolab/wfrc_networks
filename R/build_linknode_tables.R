@@ -275,8 +275,8 @@ join_all_segments <- function(linknodes, segment_data){
   
   # A map correlating the functional types in the link data (l) and the segment data(s)
   type_lookup <- list(
-    "Freeway"  = list(l = c("Freeway"), s = c("Freeway", "Expressway"), buffer = 60),
-    "Ramp"     = list(l = c("Ramp"),    s = c("Ramp"), buffer = 60),
+    "Freeway"  = list(l = c("Freeway"), s = c("Freeway", "Expressway"), buffer = 100),
+    "Ramp"     = list(l = c("Ramp"),    s = c("Ramp"), buffer = 100),
     "Arterial" = list(l = c("Principal Arterial", "Arterial"),  
                       s = c("Expressway", "Principal Arterial", "Minor Arterial"), buffer = 60),
     "Collector"= list(l = c("Collector"), s = c("Collector", "Minor Arterial"), buffer = 60)
