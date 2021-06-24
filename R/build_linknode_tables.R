@@ -89,7 +89,10 @@ extract_roads <- function(bb, gdb_path){
         ftype %in% c(10) ~ "Collector",
         ftype %in% c(11) ~ "Local",
         TRUE ~ as.character(NA)
-      )
+      ),
+      # Manual corrections:
+      #   - SR-92 is coded as a ramp because they call it a collector - distributor
+      fdesc = ifelse(grepl("SR-92", Name), "Principal Arterial", fdesc)
     ) %>%
     filter(!is.na(fdesc))
     
