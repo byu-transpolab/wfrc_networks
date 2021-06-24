@@ -292,22 +292,53 @@ join_all_segments <- function(linknodes, segment_data){
     bind_rows(.id = "join_fclass")
   
   # join info back onto link data
-  linknodes$links <- left_join(
+  link_attributes <- left_join(
     linknodes$links,
     segment_attributes,
     by = "link_id"
-  ) %>%
-    # if the road is missing capacity, assume one lane and 800 v/hr capacity
+  ) 
+  
+  # Some links do not pair up with TDM segments for various reasons. 
+  # We develop an imputation scheme to fix these by taking the most
+  # common lanes and capacity value from that type. 
+  attribute_imputation <- link_attributes %>%
+    st_set_geometry(NULL) %>% 
+    group_by(fdesc) %>%
+    summarise(
+      #n = n(),  
+      #missing = sum(is.na(capacity)),
+      imp_capacity = Mode(capacity, na.rm = TRUE),
+      #capacity_mean = mean(capacity, na.rm = TRUE),
+      imp_lanes = Mode(lanes, na.rm = TRUE),
+      #lanes_mean = mean(lanes, na.rm = TRUE),
+    ) %>%
+    # if the type is still missing capacity (local roads), 
+    # assume one lane and 800 v/hr capacity
     mutate(
-      capacity = ifelse(is.na(capacity), 800, capacity),
-      lanes = ifelse(is.na(lanes), 1, lanes)
+      imp_capacity = ifelse(is.na(imp_capacity), 800, imp_capacity),
+      imp_lanes = ifelse(is.na(imp_lanes), 1, imp_lanes)
     )
+  
+    
+  linknodes$links <- link_attributes %>%
+    left_join(attribute_imputation, by = "fdesc") %>%
+    mutate(
+      capacity = ifelse(is.na(capacity), imp_capacity, capacity),
+      lanes = ifelse(is.na(lanes), imp_lanes, lanes),
+    ) %>%
+    select(-imp_capacity, -imp_lanes)
   
   linknodes
 }
   
   
 
+Mode <- function(x, na.rm = FALSE) {
+  if(na.rm) x = x[!is.na(x)]
+  
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
 
 
 
