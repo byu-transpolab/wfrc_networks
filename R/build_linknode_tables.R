@@ -208,6 +208,12 @@ get_segments <- function(summaries_file, nodes_file, bb){
 #' 
 #' @return link nodes with added columns
 #' 
+#' @examples
+#' 
+#' leaflet() %>%
+#'   addPolylines(data = links %>% st_transform(4326)) %>%
+#'   addPolylines(data = segments %>% st_transform(4326), color = "black") 
+#' 
 join_segments <- function(linknodes, segment_data, link_types, segment_types, buffer = 60){
   
   # make a buffer around the links in the specified link_types
