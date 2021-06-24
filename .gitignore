@@ -5,5 +5,6 @@
 
 data/MM_NetworkDataset*
 data/payson/*
+data/utco/*
 _targets/*
 data/wfrcmag/network.geojson
