@@ -13,8 +13,8 @@ source("R/build_linknode_tables.R")
 source("R/join_segments_data.R")
 
 
-bounding_box <- "data/payson_bb.geojson"
-output_folder <- "data/payson"
+bounding_box <- "data/wfrcmag_bb.geojson"
+output_folder <- "data/wfrcmag"
 
 # Set target-specific options such as packages.
 tar_option_set(packages = c("tidyverse", "sf"))
