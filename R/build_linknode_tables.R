@@ -159,7 +159,8 @@ get_segments <- function(summaries_file, nodes_file, bb){
   # get link information from travel demand model network file
   tdm_links <- foreign::read.dbf(summaries_file) %>%
     as_tibble() %>%
-    filter(STREET != "Cent") %>%
+    filter(STREET != "Cent") %>% # remove centroids
+    filter(!FT %in% c(38, 39)) %>% # remove hov lanes and connectors
     filter(A %in% tdm_nodes$N & B %in% tdm_nodes$N) %>%
     transmute(
       LINKID, A, B, 
