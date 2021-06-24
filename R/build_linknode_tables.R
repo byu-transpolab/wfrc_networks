@@ -265,6 +265,12 @@ join_segments <- function(linknodes, segment_data, link_types, segment_types, bu
 #' 
 #' @return The linknodes list with lanes and capacity attributes appended
 #' 
+#' @examples 
+#' plot(linknodes$links[which(linknodes$links$fdesc %in% c("Freeway")), "fdesc"], reset = FALSE)
+#' plot(st_transform(segment_data$links, 4326)[which(segment_data$links$FTCLASS %in% c("Freeway", "Expressway")), "FTCLASS"], add = TRUE)
+#' 
+#' 
+#' 
 join_all_segments <- function(linknodes, segment_data){
   
   # A map correlating the functional types in the link data (l) and the segment data(s)
@@ -277,8 +283,6 @@ join_all_segments <- function(linknodes, segment_data){
   )
   
   # Code to plot links and segments on top of each other (in debugging)
-  plot(linknodes$links[which(linknodes$links$fdesc %in% c("Principal Arterial", "Arterial")), "fdesc"], reset = FALSE)
-  plot(st_transform(segment_data$links, 4326)[which(segment_data$links$FTCLASS %in% c("Principal Arterial", "Minor Arterial")), "FTCLASS"], add = TRUE)
   
   # loop through the map, joining attributes from the TDM segments onto the 
   # corresponding links
