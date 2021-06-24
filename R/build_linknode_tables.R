@@ -82,8 +82,8 @@ extract_roads <- function(bb, gdb_path){
       speed = Speed, 
       ftype = gsub(".*?([0-9]+).*", "\\1", CartoCode),
       fdesc = case_when(
-        ftype %in% c(1, 2, 4) ~ "Freeway",
-        ftype %in% c(3, 5) ~ "Principal Arterial",
+        ftype %in% c(1) ~ "Freeway",
+        ftype %in% c(2, 3, 4, 5) ~ "Principal Arterial",
         ftype %in% c(7) ~ "Ramp",
         ftype %in% c(8) ~ "Arterial",
         ftype %in% c(10) ~ "Collector",
