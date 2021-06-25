@@ -8,3 +8,7 @@ data/payson/*
 data/utco/*
 _targets/*
 data/wfrcmag/network.geojson
+
+data/ArcGisJoins*
+data/utah*
+osm*
