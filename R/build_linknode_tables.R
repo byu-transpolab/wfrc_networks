@@ -49,6 +49,11 @@ download_gdb <- function(filegdb){
 #' @importFrom sf st_read st_transform st_filter
 #' @importFrom dplyr mutate row_number
 #' 
+#' @examples
+#' leaflet() %>%
+#'   addPolylines(data = mylinks) %>%
+#'   addCircleMarkers(data = mynodes, color = "black")
+#' 
 extract_roads <- function(bb, gdb_path){
   
   # to see the layers in the database
@@ -64,12 +69,10 @@ extract_roads <- function(bb, gdb_path){
   # get auto_links
   links <- sf::st_read(gdb_path, layer = "BikePedAuto") %>%
     sf::st_transform(4326) %>%
-    dplyr::filter(AutoNetwork == "Y") %>%
+    dplyr::filter(BikeNetwork == "Y") %>%
     st_cast(., "MULTILINESTRING") %>% 
-    sf::st_filter(bb)  %>%
-    
-    # create a link id and get other attributes
-    dplyr::transmute(
+    sf::st_filter(bb)   %>%
+    transmute(
       link_id = dplyr::row_number(), 
       aadt = ifelse(AADT == 0, NA, AADT),
       # the "oneway" field can take three values
@@ -80,23 +83,10 @@ extract_roads <- function(bb, gdb_path){
       ),
       length = Length_Miles,
       speed = Speed, 
-      ftype = gsub(".*?([0-9]+).*", "\\1", CartoCode),
-      fdesc = case_when(
-        ftype %in% c(1) ~ "Freeway",
-        ftype %in% c(2, 3, 4, 5) ~ "Principal Arterial",
-        ftype %in% c(7) ~ "Ramp",
-        ftype %in% c(8) ~ "Arterial",
-        ftype %in% c(10) ~ "Collector",
-        ftype %in% c(11) ~ "Local",
-        TRUE ~ as.character(NA)
-      ),
-      # Manual corrections:
-      #   - SR-92 is coded as a ramp because they call it a collector - distributor
-      fdesc = ifelse(grepl("SR-92", Name), "Principal Arterial", fdesc)
-    ) %>%
-    filter(!is.na(fdesc))
-    
-  
+      bikelane_l = ifelse(BIKE_L == "", "none", BIKE_L),
+      bikelane_r = ifelse(BIKE_R == "", "none", BIKE_R),
+    ) 
+
   # Node identification =======
   # The links don't have any node information on them. So let's extract the
   # first and last points from each polyline. This actually extracts all of them
@@ -128,7 +118,21 @@ extract_roads <- function(bb, gdb_path){
       b = new_b
     ) %>%
     select(-new_a, -new_b)
- 
+  
+  my_backwards_links <- mylinks %>%
+    filter(oneway == "0") %>%
+    mutate(
+      new_a = a,
+      new_b = b,
+      a = new_a,
+      b = new_b,
+      bikelane = bikelane_l
+    ) %>%
+    select(link_id, a, b, aadt, speed, length, bikelane)
+  
+  my_forward_links <- mylinks %>%
+    select(link_id, a, b, aadt, speed, length, bikelane = bikelane_r)
+  
   # remove any nodes that are not part of link endpoints
   mynodes <- nodes %>% 
     dplyr::filter(id %in% mylinks$a | id %in% mylinks$b)
@@ -136,7 +140,7 @@ extract_roads <- function(bb, gdb_path){
  
   # Return list of links and nodes ============
   list(
-    links = mylinks,
+    links = bind_rows(my_backwards_links, my_forward_links),
     nodes = mynodes
   )
   

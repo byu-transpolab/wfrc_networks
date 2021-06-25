@@ -13,8 +13,8 @@ source("R/build_linknode_tables.R")
 source("R/join_segments_data.R")
 
 
-bounding_box <- "data/wfrcmag_bb.geojson"
-output_folder <- "data/wfrcmag"
+bounding_box <- "data/provo_bb.geojson"
+output_folder <- "data/provo_bikes"
 
 # Set target-specific options such as packages.
 tar_option_set(packages = c("tidyverse", "sf"))
@@ -26,13 +26,7 @@ list(
   tar_target(bb,  st_read(bounding_box)),
   tar_target(linknodes, extract_roads(bb, gdb)),
   
-  tar_target(segment_data, 
-             get_segments("data/v831_SE19_Net19__Summary.dbf", 
-                          "data/v831_SE19_Net19__Summary_nodes.dbf",
-                          bb)),
-  
-  tar_target(linknodes_attr, join_all_segments(linknodes, segment_data)),
-  tar_target(write, write_linknodes(linknodes_attr, output_folder), 
+  tar_target(write, write_linknodes(linknodes, output_folder), 
              format = "file"),
   
   message("Done")
