@@ -106,32 +106,51 @@ extract_roads <- function(bb, gdb_path){
     sf::st_join(nodes, join = sf::st_nearest_feature) %>%
     dplyr::rename(b = id)
   
-  # put the node id's onto the links dataset
+  # put the node id's onto the links dataset in the forward direction
   mylinks <- links %>%
     dplyr::left_join(start_nodes %>% sf::st_set_geometry(NULL), by = "link_id") %>%
-    dplyr::left_join(end_nodes   %>% sf::st_set_geometry(NULL), by = "link_id") %>%
-    # If the link goes against the drawn order, replace a and b
-    mutate(
-      new_a = ifelse(oneway == 2, b, a),
-      new_b = ifelse(oneway == 2, a, b),
-      a = new_a,
-      b = new_b
-    ) %>%
-    select(-new_a, -new_b)
+    dplyr::left_join(end_nodes   %>% sf::st_set_geometry(NULL), by = "link_id")  %>%
+    mutate(link_id = as.character(link_id))
   
+  
+  # If the link goes against the drawn order, replace a and b and reverse the order
   my_backwards_links <- mylinks %>%
-    filter(oneway == "0") %>%
+    filter(oneway == "2") %>%
+    st_reverse() %>%
     mutate(
       new_a = a,
       new_b = b,
       a = new_a,
       b = new_b,
       bikelane = bikelane_l
+    )  %>%
+    select(link_id, a, b, aadt, speed, length, bikelane)
+    
+    
+  # If the link is a two-way link, create another link in the reverse direction
+  my_reverse_links <- mylinks %>%
+    filter(oneway == "0") %>%
+    st_reverse() %>%
+    mutate(
+      link_id = str_c(link_id, "_1", sep = ""),
+      new_a = a,
+      new_b = b,
+      a = new_a,
+      b = new_b,
+      bikelane = bikelane_l,
+      aadt = aadt / 2
     ) %>%
     select(link_id, a, b, aadt, speed, length, bikelane)
   
+  # forward direction of two-way links
   my_forward_links <- mylinks %>%
-    select(link_id, a, b, aadt, speed, length, bikelane = bikelane_r)
+    filter(oneway == "0") %>%
+    transmute(link_id, a, b, aadt = aadt / 2, speed, length, bikelane = bikelane_r)
+  
+  # standard one-way link directions
+  my_normal_links <- mylinks %>%
+    filter(oneway == "1") %>%
+    transmute(link_id, a, b, aadt, speed, length, bikelane = bikelane_r)
   
   # remove any nodes that are not part of link endpoints
   mynodes <- nodes %>% 
@@ -140,7 +159,7 @@ extract_roads <- function(bb, gdb_path){
  
   # Return list of links and nodes ============
   list(
-    links = bind_rows(my_backwards_links, my_forward_links),
+    links = bind_rows(my_reverse_links, my_backwards_links, my_forward_links, my_normal_links),
     nodes = mynodes
   )
   
