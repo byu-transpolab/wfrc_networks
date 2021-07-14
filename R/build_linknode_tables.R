@@ -64,7 +64,7 @@ extract_roads <- function(bb, gdb_path){
     sf::st_transform(4326) %>%
     # create a node id
     dplyr::mutate(id = dplyr::row_number()) %>%
-    sf::st_filter(bb)
+    sf::st_filter(st_buffer(bb, 1000))
     
   # get auto_links
   links <- sf::st_read(gdb_path, layer = "BikePedAuto") %>%
