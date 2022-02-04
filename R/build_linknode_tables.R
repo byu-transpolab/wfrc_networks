@@ -388,6 +388,8 @@ write_linknodes <- function(linknodeset, folder){
   # write links as a geojson for mapping
   sf::st_write(linknodeset$links, file.path(folder, "network.geojson"), 
                delete_dsn = TRUE)
+  sf::st_write(linknodeset$links, file.path(folder, "network.shp"), 
+               delete_dsn = TRUE)
    
   # write links as CSV file
   readr::write_csv(linknodeset$links %>% sf::st_set_geometry(NULL), file.path(folder, "links.csv"))
